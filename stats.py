@@ -21,15 +21,19 @@ from keras.layers import Dropout
 
 class svc:
     # Labels used supposed to be of format 1 and -1
-    def __init__(self, training_input, training_output, kernel='rbf', degree=3, C=1, scale_range=(0, 1)):
+    def __init__(self, training_input, training_output, kernel='rbf', degree=3, C=1, scale_range=(0, 1), scale=True):
         self.output_data = training_output
         self.feature_range = scale_range
         self.kernel = kernel
         self.degree = degree
         self.C = C
-        self.scaler = MinMaxScaler(
-            feature_range=scale_range).fit(training_input)
-        self.input_data = self.scaler.transform(training_input)
+        self.scale = scale
+        if scale:
+            self.scaler = MinMaxScaler(
+                feature_range=scale_range).fit(training_input)
+            self.input_data = self.scaler.transform(training_input)
+        else:
+            self.input_data = training_input
 
     def fit(self, shuffle=True):
         print("Cross-validating training input for hint of accuracy.")
@@ -45,25 +49,38 @@ class svc:
         self.clf.fit(self.input_data, self.output_data)
 
     def predict(self, data):
-        return self.clf.predict(self.scaler.transform([data])[0])
+        if self.scale:
+            scaled = self.scaler.transform(data)[0]
+            calced = self.clf.predict(scaled.reshape(1, -1))
+            return calced
+        else:
+            return self.clf.predict(data)
 
 class nn:
-    def __init__(self, training_input, training_labels, nr_outputs, hidden_layer_nodes, epochs=10, optimization_runs=10, scale_range=(0, 1)):
+    def __init__(self, training_input, training_labels, nr_outputs, hidden_layer_nodes, epochs=10, optimization_runs=10, scale_range=(0, 1), scale=True, classification_classes=None, classifier = False):
         self.output_data = training_labels
-        self.scaler = MinMaxScaler(
-            feature_range=scale_range).fit(training_input)
-        self.input_data = self.scaler.transform(
-            training_input).astype(np.float32)
+        self.scale = scale
+        if scale:
+            self.scaler = MinMaxScaler(
+                feature_range=scale_range).fit(training_input)
+            self.input_data = self.scaler.transform(
+                training_input).astype(np.float32)
+        else:
+            self.input_data = training_input    
+
         self.nr_features = np.shape(self.input_data)[1]
         self.nr_training_samples = np.shape(self.input_data)[0]
-        self.nr_classes = nr_outputs
+        self.nr_outputs = nr_outputs
+        
+        self.classification = classifier
+        self.nr_classes = classification_classes
         self.nr_hidden_layers = len(hidden_layer_nodes)
-        self.epochs = epochs
         self.hidden_layer_nodes = hidden_layer_nodes
         self.hidden_layers = [None]*(self.nr_hidden_layers+1)
         self.final_hidden_layers = [None]*(self.nr_hidden_layers+1)
+        
+        self.epochs = epochs
         self.optimization_tries = optimization_runs
-
 
     def train_network(self):
 
@@ -71,13 +88,19 @@ class nn:
         #Weights are initialized randomly, loop and see where optimizer performs the best
         for opt_iteration in range(self.optimization_tries):
             x = tf.compat.v1.placeholder(tf.float32, [1, self.nr_features])
-            y = tf.compat.v1.placeholder(tf.float32, [None, self.nr_classes])
+            y = tf.compat.v1.placeholder(tf.float32, [None, self.nr_outputs])
 
             predictions = self.predict_train(x)
-            cost_func = tf.square(y-predictions)
-            cost = tf.reduce_mean(cost_func)
+            if self.classification:
+                if self.nr_classes > 2:
+                    cost = tf.reduce_mean(tf.compat.v1.nn.softmax_cross_entropy_with_logits(labels=predictions, logits=y,))
+                else:
+                    cost = tf.reduce_mean(tf.compat.v1.nn.sigmoid_cross_entropy_with_logits(labels=predictions, logits=y,))
+            else:
+                cost = tf.reduce_mean(tf.square(y-predictions))
+                
             optimizer = tf.compat.v1.train.AdamOptimizer().minimize(cost)
-
+            
             with tf.compat.v1.Session() as sess:
                 
                 sess.run(tf.compat.v1.global_variables_initializer())
@@ -87,10 +110,11 @@ class nn:
                     epoch_loss = 0
                     for sample in range(self.nr_training_samples):
                         x_tmp = self.input_data[sample].reshape((1, self.nr_features))
-                        y_tmp = self.output_data[sample].reshape((1, self.nr_classes))
+                        y_tmp = self.output_data[sample].reshape((1, self.nr_outputs))
                         _, c = sess.run([optimizer, cost], feed_dict={x: x_tmp, y: y_tmp})
                         epoch_loss += c
-                    self.input_data, self.output_data= sklearn.utils.shuffle(self.input_data, self.output_data)
+                    print("Epoch", epoch, "out of", self.epochs, "epoch loss:", epoch_loss)
+                        #self.input_data, self.output_data= sklearn.utils.shuffle(self.input_data, self.output_data)
 
                 print("Optimization run", opt_iteration+1,"out of", self.optimization_tries,"loss", epoch_loss)
                 if epoch_loss < best:
@@ -107,8 +131,8 @@ class nn:
                 self.hidden_layers[hidden_layer] = {'weights': tf.Variable(tf.random.normal([self.nr_features, self.hidden_layer_nodes[hidden_layer]])),
                                                     'biases': tf.Variable(tf.random.normal([1, self.hidden_layer_nodes[hidden_layer]]))}
             elif(hidden_layer == self.nr_hidden_layers):
-                self.hidden_layers[hidden_layer] = {'weights': tf.Variable(tf.random.normal([self.hidden_layer_nodes[hidden_layer-1], self.nr_classes])),
-                                                    'biases': tf.Variable(tf.random.normal([1, self.nr_classes]))}
+                self.hidden_layers[hidden_layer] = {'weights': tf.Variable(tf.random.normal([self.hidden_layer_nodes[hidden_layer-1], self.nr_outputs])),
+                                                    'biases': tf.Variable(tf.random.normal([1, self.nr_outputs]))}
             else:
                 self.hidden_layers[hidden_layer] = {'weights': tf.Variable(tf.random.normal([self.hidden_layer_nodes[hidden_layer-1], self.hidden_layer_nodes[hidden_layer]])),
                                                     'biases': tf.Variable(tf.random.normal([1, self.hidden_layer_nodes[hidden_layer]]))}
@@ -122,14 +146,28 @@ class nn:
                 layers[layer] = tf.add(tf.matmul(
                     layers[layer-1], self.hidden_layers[layer]['weights']), self.hidden_layers[layer]['biases'])
 
-            layers[layer] = tf.keras.activations.softmax(layers[layer])
+            layers[layer] = tf.keras.activations.elu(layers[layer])
 
         ret = tf.add(tf.matmul(layers[-1], self.hidden_layers[-1]['weights']), self.hidden_layers[-1]['biases'])
+        
+        #Different activation functions depending on what kind of problem we are doing
+        if self.classification:
+            if self.nr_classes > 2:
+                ret = tf.keras.activations.softmax(ret)
+            else:
+                ret = tf.keras.activations.sigmoid(ret)
+        # else:
+        #     ret = tf.keras.activations.linear(ret)   
         return ret
 
     def predict(self, input_data):
-        data = self.scaler.transform(input_data).astype(np.float32)
+        if self.scale:
+            data = self.scaler.transform(input_data).astype(np.float32)
+        else:
+            data = input_data.astype(np.float32)
         layers = [None]*(self.nr_hidden_layers)
+        
+        #Feed forward
         for layer in range(self.nr_hidden_layers):
             if(layer == 0):
                 layers[layer] = tf.add(tf.matmul(
@@ -137,13 +175,25 @@ class nn:
             else:
                 layers[layer] = tf.add(tf.matmul(
                     layers[layer-1], self.final_hidden_layers[layer]['weights']), self.final_hidden_layers[layer]['biases'])
-            layers[layer] = tf.keras.activations.softmax(layers[layer])
+            layers[layer] = tf.keras.activations.elu(layers[layer])
 
         output = tf.add(tf.matmul(
             layers[-1], self.final_hidden_layers[-1]['weights']), self.final_hidden_layers[-1]['biases'])
+        
+        #Let er rip
         with tf.compat.v1.Session() as sess:
             sess.run(tf.compat.v1.global_variables_initializer())
             ret = sess.run(output)
+            if self.classification:
+                if self.nr_classes > 2:
+                    ret = tf.keras.activations.softmax(ret)
+                else:
+                    ret = tf.convert_to_tensor(ret, np.float32)
+                    ret = tf.keras.activations.sigmoid(ret)
+            # else:
+            #     ret = tf.keras.activations.linear(ret)    
+            ret = tf.convert_to_tensor(ret, np.float32)
+            ret = sess.run(ret)
         return ret
 
 #Seems to not work very well.. Use only nn

@@ -3,13 +3,13 @@
 """
 Created on Mon Feb 24 21:21:30 2020
 x
-@author: astalon
+@author: Erik Lagerström
 """
 
 
 import pandas as pd
 import numpy as np
-import stats
+import stats_new as stats
 import matplotlib.pyplot as plt
 import matplotlib
 
@@ -19,86 +19,75 @@ df.set_index("Date", inplace=True)
 
 df.loc[:, df.columns != 'EURUSD'] = df.loc[:, df.columns != 'EURUSD']/100
 
-#df['3mspread'] = df['US3M'] - df['EURO3M']
-#df = df.drop(['US3M', 'EURO3M'], axis=1)
+df['3mspread'] = df['US3M'] - df['EURO3M']
+df = df.drop(['US3M', 'EURO3M'], axis=1)
+
+target = df['EURUSD'].shift(-1).dropna()
+target.drop(df.index[0], inplace = True)
 
 #df = df.join(df.diff(), rsuffix='_1mchange').dropna()
-target = df['EURUSD'].shift(-1).dropna()
-df = df[:-1]
-dates = dates[:-1]
+df.drop(df.index[len(df)-1], inplace = True)
+df.drop(df.index[0], inplace = True)
+
+data_points = len(df)
+
+df = df.to_numpy()
+target = target.to_numpy()
+
+#df = np.random.rand(data_points,1)*10 - 1
+#target = (np.sin(df))/2.5 + (np.random.randn(data_points,1)/20)
+
+training_part = 0.8
+end_index = np.int(np.floor(training_part*data_points))
 
 features = df.shape[1]
 
-training_index = 150
-look_back = 5
+train_features = df[:end_index, :]
+train_labels = target[:end_index, ].reshape(-1,1)
 
-train_features = df.iloc[:150, ]
-train_labels = target.iloc[:150, ]
+test_features = df[end_index:, :]
+test_labels = target[end_index:, ].reshape(-1, 1)
 
-test_features = df.iloc[150:, ]
-test_labels = target.iloc[150:, ].to_numpy()
+#test_labels = target[end_index:, ].reshape(-1,1)
+x = np.linspace(1, data_points-end_index, data_points-end_index)
+
+#dates_plot = dates[150:, ]
+
+# nn_predictions = nn.predict(test_features)
+
+nn = stats.lstm(train_features, train_labels, [32, 32], epochs = 30, layer_activation = "tanh", look_back = 2, scale_range = (0, 1))
+nn_predictions = nn.predict(test_features)
+
+errors_nn = np.subtract(test_labels,nn_predictions)
+errors_nn = np.square(errors_nn)
+
+print("Mean squared error ANN: ", np.mean(errors_nn))
+
 
 lm = stats.linreg(train_features, train_labels)
 lm.fit(shuffle=False)
 lm_predictions = []
 dates_plot = []
 
-# nn = stats.nn(train_features, train_labels, 1, [6], epochs=15, optimization_runs=10)
-# nn.train_network()
-# nn_predictions = nn.predict(test_features)
-
 for i in range(len(test_features)):
-	data = test_features.iloc[i, :].to_numpy().reshape((1, features))
-	predicted = lm.predict(data)
-	lm_predictions.append(predicted)
-	dates_plot.append(dates[training_index+i])
+	inp = test_features[i,:].reshape(-1, features)
+	predicted = lm.predict(inp)
+	lm_predictions.append(predicted[0])
+	#dates_plot.append(dates[training_index+i])
 	
-	
-errors = (test_labels - lm_predictions)
+
+lm_predictions = np.array(lm_predictions).reshape(-1, 1)
+#lm_predictions = np.asarray(lm_predictions, dtype=np.float32).reshape(-1, 1)
+
+errors = np.subtract(test_labels,lm_predictions)
 errors = np.square(errors)
-fig, ax = plt.subplots(2,1)
-ax[0].plot_date(dates_plot, lm_predictions, label='model predictions', linestyle='solid', marker=None)
-ax[0].plot_date(dates_plot, test_labels, label='EUR/USD', linestyle='solid', marker=None)
-ax[0].set_title('Out of sample EUR/USD 1month forecasts')
-ax[0].legend()
-ax[1].plot_date(dates_plot, errors, label='squared errors', linestyle='solid', marker=None)
-ax[1].legend()
+print("Mean squared error LM: ", np.mean(errors))
+
+#plt.plot(x, test_labels, 'r', linewidth=1, label='sin')
+plt.plot(x, errors_nn, 'b', linewidth=1, label='nn')
+plt.plot(x, errors, 'g', linewidth=1, label='lm')
+plt.legend()
 plt.show()
 
-# features = []
-# labels= []
-
-# features_test = []
-# labels_test = []
-
-# for j in range(look_back, training_index):
-#     tmp = df.iloc[j-look_back:j,].to_numpy()
-#     features.append(tmp)
-#     labels.append(target.iloc[j,])
- 	
-# for i in range(training_index+look_back, len(df)):
-#     tmp = df.iloc[i-look_back:i,].to_numpy()
-#     features_test.append(tmp)
-#     labels_test.append(target.iloc[i,])
-
-
-# #features = pd.DataFrame(features).to_numpy()
-
-# features = np.array(features)
-# labels = np.array(labels)
-
-# features_test = np.array(features_test)
-# labels_test = np.array(labels_test)
-
-# lstm = stats.lstm(features, labels, 1, [10, 5], optimization_runs=10, history=look_back, dropout=0.4)
-# lstm.fit()
-# lstm_predictions = lstm.predict(features_test)
-
-
-
-
-
-# # Kolla validation
-# Make LSTM in TF
-# Make minimum variance
-# SVC köp/sälj eurusd
+# Borde bara vara en rad som försvinner när vi sätter look_back = 2? Gör om så att den shiftar för look_back = 1
+# Ändra test_labels likadant

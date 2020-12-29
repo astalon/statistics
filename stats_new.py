@@ -185,8 +185,8 @@ def transform_data(input_data, output_data, look_back=1):
     X, Y = [], []
 
     for i in range(input_data.shape[0]-look_back):
-        X.append(input_data[i:(i+look_back), :])
-        Y.append(output_data[i+look_back-1, :])
+        X.append(input_data[i:(i+look_back+1), :])
+        Y.append(output_data[i+look_back, :]) 
 
     return np.array(X), np.array(Y)
 
@@ -209,7 +209,7 @@ class lstm:
         self.input_scaler.fit(input_data)
         input_data = self.input_scaler.transform(input_data)
 
-        if look_back >1:
+        if look_back >0:
             input_data, output_data = transform_data(input_data, output_data, look_back)  
             #output_data = np.delete(output_data, [i for i in range(look_back-1)], 0)
             
@@ -280,7 +280,3 @@ class lstm:
 
         return self.output_scaler.inverse_transform(unscaled_return)
 
-'''
-Test whether we should try and use activation function in the last layer also? Linear?
-
-'''

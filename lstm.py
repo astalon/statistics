@@ -37,7 +37,7 @@ target = target.to_numpy()
 #df = np.random.rand(data_points,1)*10 - 1
 #target = (np.sin(df))/2.5 + (np.random.randn(data_points,1)/20)
 
-training_part = 0.8
+training_part = 0.7
 end_index = np.int(np.floor(training_part*data_points))
 
 features = df.shape[1]
@@ -48,6 +48,10 @@ train_labels = target[:end_index, ].reshape(-1,1)
 test_features = df[end_index:, :]
 test_labels = target[end_index:, ].reshape(-1, 1)
 
+lookback = 2
+
+test_features_nn = df[(end_index-lookback):, :]
+
 #test_labels = target[end_index:, ].reshape(-1,1)
 x = np.linspace(1, data_points-end_index, data_points-end_index)
 
@@ -55,8 +59,8 @@ x = np.linspace(1, data_points-end_index, data_points-end_index)
 
 # nn_predictions = nn.predict(test_features)
 
-nn = stats.lstm(train_features, train_labels, [32, 32], epochs = 30, layer_activation = "tanh", look_back = 2, scale_range = (0, 1))
-nn_predictions = nn.predict(test_features)
+nn = stats.lstm(train_features, train_labels, [128,128], epochs = 30, layer_activation = "sigmoid", look_back = lookback, scale_range = (0, 1))
+nn_predictions = nn.predict(test_features_nn)
 
 errors_nn = np.subtract(test_labels,nn_predictions)
 errors_nn = np.square(errors_nn)
